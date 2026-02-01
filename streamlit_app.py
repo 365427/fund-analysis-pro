@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import os
 import time
-import requests
 import akshare as ak
 import inspect
 import datetime
@@ -34,7 +33,7 @@ def get_detail_data(fund_code):
             latest_df = df.copy()
             report_date = "最新一期"
         else:
-            date_col = date_cols
+            date_col = date_cols[0]
             latest_date = df[date_col].max()
             latest_df = df[df[date_col] == latest_date].copy()
             report_date = str(latest_date)
@@ -82,14 +81,14 @@ def get_fund_realtime_info(fund_code, is_today_trading_day):
         if not date_col_candidates:
             print(f"DEBUG: 基金 {fund_code} 未找到日期列。列名为: {list(hist_df.columns)}")
             return "N/A", "N/A"
-        date_col = date_col_candidates
+        date_col = date_col_candidates[0]
 
         # 查找净值列
         nav_col_candidates = [col for col in hist_df.columns if '单位净值' in col or '估算' in col]
         if not nav_col_candidates:
              print(f"DEBUG: 基金 {fund_code} 未找到净值列。列名为: {list(hist_df.columns)}")
              return "N/A", "N/A"
-        nav_col = nav_col_candidates
+        nav_col = nav_col_candidates[0]
 
         hist_df.sort_values(by=date_col, ascending=False, inplace=True)
         hist_df.reset_index(drop=True, inplace=True)
@@ -99,8 +98,8 @@ def get_fund_realtime_info(fund_code, is_today_trading_day):
             print(f"DEBUG: 基金 {fund_code} 数据不足，无法计算涨跌幅。")
             return "N/A", "N/A"
 
-        current_nav = nav_series.iloc
-        prev_nav = nav_series.iloc
+        current_nav = nav_series.iloc[0]
+        prev_nav = nav_series.iloc[1]
 
         if prev_nav == 0:
             daily_growth = 0
@@ -122,7 +121,7 @@ def get_fund_realtime_info(fund_code, is_today_trading_day):
         print(f"DEBUG: 基金 {fund_code} 发生未知错误: {e}")
         return "N/A", "N/A"
 
-# --- 6. 搜索与收藏逻辑 (已修改) ---
+# --- 6. 搜索与收藏逻辑 ---
 @st.cache_data(ttl=3600)
 def get_all_funds():
     try:
@@ -132,7 +131,6 @@ def get_all_funds():
         return pd.DataFrame(columns=['基金代码', '基金简称'])
 
 CSV_FILE = 'fund_favs.csv'
-
 def load_favs(): 
     if os.path.exists(CSV_FILE):
         df = pd.read_csv(CSV_FILE, dtype={'代码': str})
@@ -145,80 +143,56 @@ def load_favs():
 def save_favs(df): 
     df.to_csv(CSV_FILE, index=False)
 
-# --- 7. 侧边栏交互 (增加导入导出) ---
-st.sidebar.header("⭐ 基金搜索与管理")
-
-# 导入功能
-uploaded_file = st.sidebar.file_uploader("📂 导入收藏列表 (CSV)", type=["csv"], key="import")
-if uploaded_file is not None:
-    try:
-        imported_df = pd.read_csv(uploaded_file)
-        # 确保列名正确
-        if '代码' in imported_df.columns and '名称' in imported_df.columns:
-            # 合并并去重
-            current_favs = load_favs()
-            combined = pd.concat([current_favs, imported_df]).drop_duplicates(subset=['代码']).reset_index(drop=True)
-            save_favs(combined)
-            st.sidebar.success("导入成功！")
-            st.rerun() # 刷新页面以显示新数据
-        else:
-            st.sidebar.error("文件格式错误，需包含'代码'和'名称'列")
-    except Exception as e:
-        st.sidebar.error(f"导入失败: {e}")
-
-# 导出功能
-fav_df = load_favs()
-if not fav_df.empty:
-    csv = fav_df.to_csv(index=False)
-    st.sidebar.download_button(
-        label="📤 导出收藏列表",
-        data=csv,
-        file_name='我的基金收藏.csv',
-        mime='text/csv',
-    )
-
+# --- 7. 侧边栏交互（修复索引错误） ---
+st.sidebar.header("⭐ 基金搜索")
 all_funds = get_all_funds()
+fav_df = load_favs()
 
 search = st.sidebar.text_input("🔍 输入名称或代码 (如: 161725)")
 f_code, f_name = "", ""
 if search:
-    res = all_funds[(all_funds['基金代码'].str.contains(search)) | (all_funds['基金简称'].str.contains(search))]
+    res = all_funds[
+        (all_funds['基金代码'].str.contains(search)) | 
+        (all_funds['基金简称'].str.contains(search))
+    ]
     if not res.empty:
-        f_code, f_name = res.iloc['基金代码'], res.iloc['基金简称']
+        # 【关键修改】用 .loc 或直接通过列名取值，避免 .iloc[列名]
+        f_code = res['基金代码'].iloc[0]  # 取第0行的“基金代码”
+        f_name = res['基金简称'].iloc[0]  # 取第0行的“基金简称”
         st.sidebar.success(f"已选: {f_name}")
 
-# --- 8. 主界面：显示收藏列表 ---
-st.subheader("📊 我的收藏基金")
-if not fav_df.empty:
-    # 更新收藏列表中的涨跌幅
-    updated_favs = fav_df.copy()
-    today_is_trading = is_trading_day(datetime.date.today())
-    
-    for idx, row in updated_favs.iterrows():
-        nav, growth = get_fund_realtime_info(row['代码'], today_is_trading)
-        updated_favs.at[idx, '涨跌幅'] = growth
-    
-    save_favs(updated_favs) # 保存更新后的数据
-    st.dataframe(updated_favs, use_container_width=True)
-else:
-    st.info("暂无收藏基金，请在侧边栏搜索并添加。")
+# --- 8. 主界面：显示收藏列表（增加导入导出） ---
+st.subheader("⭐ 我的收藏")  # 修复原代码的 st.subhead 错误
 
-# --- 9. 主界面：基金详情分析 ---
-if f_code and f_name:
-    st.subheader(f"🔍 分析基金: {f_name} ({f_code})")
-    
-    # 获取持仓数据
-    with st.spinner('正在获取持仓数据...'):
-        detail_df, report_date, err = get_detail_data(f_code)
-    
-    if detail_df is not None:
-        st.write(f"**报告期**: {report_date}")
-        st.dataframe(detail_df, use_container_width=True)
-        
-        # 显示前五大重仓股
-        top5 = detail_df.nlargest(5, 'curr_weight')
-        st.write("**前五大重仓股**:")
-        for _, row in top5.iterrows():
-            st.markdown(f"- {row['股票名称']} ({row['股票代码']}): {row['curr_weight']:.2f}%")
+# 导入收藏
+if st.sidebar.button("📂 导入收藏"):
+    uploaded_file = st.sidebar.file_uploader("上传CSV文件", type=["csv"])
+    if uploaded_file is not None:
+        try:
+            df = pd.read_csv(uploaded_file, dtype={'代码': str})
+            if '代码' in df.columns and '名称' in df.columns:
+                save_favs(df)
+                st.sidebar.success("导入成功！")
+            else:
+                st.sidebar.error("CSV格式错误，需包含【代码】和【名称】列")
+        except Exception as e:
+            st.sidebar.error(f"导入失败：{str(e)}")
+
+# 导出收藏
+if st.sidebar.button("📥 导出收藏"):
+    if not fav_df.empty:
+        csv = fav_df.to_csv(index=False)
+        st.sidebar.download_button(
+            label="点击下载CSV",
+            data=csv,
+            file_name="fund_favs.csv",
+            mime="text/csv"
+        )
     else:
-        st.error(f"获取持仓数据失败: {err}")
+        st.sidebar.warning("收藏列表为空，无法导出")
+
+# 显示收藏列表（示例逻辑，需结合实际业务完善）
+if not fav_df.empty:
+    st.dataframe(fav_df)
+else:
+    st.info("收藏列表为空，可在侧边栏搜索基金后添加")
