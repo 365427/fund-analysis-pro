@@ -70,10 +70,10 @@ def is_trading_day():
     if weekday >= 5:  # 5=周六, 6=周日
         return False
     
-    # 2025年A股交易日历（主要节假日，需根据实际情况更新）
+    # 2025年A股交易日历（主要节假日）
     holidays_2025 = [
         '2025-01-01',  # 元旦
-        '2025-01-28', '2025-01-29', '2025-01-30',  # 春节示例，需按实际日期更新
+        '2025-01-28', '2025-01-29', '2025-01-30',  # 春节
         '2025-04-04', '2025-04-05', '2025-04-06',  # 清明节
         '2025-05-01', '2025-05-02', '2025-05-03',  # 劳动节
         '2025-06-10',  # 端午节
@@ -112,33 +112,21 @@ def get_fund_basic_info(fund_code):
                 if not fund_info.empty:
                     return {
                         'code': fund_code,
-                        'name': fund_info.iloc[0]['基金简称'],
-                        'type': fund_info.iloc[0]['基金类型']
+                        'name': str(fund_info.iloc[0]['基金简称']),  # 确保转换为字符串
+                        'type': str(fund_info.iloc[0]['基金类型'])  # 确保转换为字符串
                     }
         except Exception as e:
             print(f"通过fund_name_em获取基金{fund_code}信息失败: {e}")
         
-        # 方法2：尝试通过其他接口获取
-        try:
-            fund_info = ak.fund_info_em(fund=fund_code)
-            if not fund_info.empty and '基金简称' in fund_info.columns:
-                return {
-                    'code': fund_code,
-                    'name': fund_info.iloc[0]['基金简称'],
-                    'type': fund_info.iloc[0]['基金类型'] if '基金类型' in fund_info.columns else '未知'
-                }
-        except Exception as e:
-            print(f"通过fund_info_em获取基金{fund_code}信息失败: {e}")
-        
         return {
-            'code': fund_code,
+            'code': str(fund_code),
             'name': f"基金{fund_code}",
             'type': '未知'
         }
     except Exception as e:
         print(f"获取基金{fund_code}基本信息异常: {e}")
         return {
-            'code': fund_code,
+            'code': str(fund_code),
             'name': f"基金{fund_code}",
             'type': '未知'
         }
@@ -152,9 +140,6 @@ def get_fund_estimation_from_api(fund_code):
         if not est_data.empty and len(est_data) > 0:
             # 找到最新的估算数据
             latest = None
-            
-            # 检查数据中是否有今天的数据
-            current_date = get_beijing_time().strftime('%Y-%m-%d')
             
             for _, row in est_data.iterrows():
                 # 检查是否有估算数据
@@ -289,7 +274,7 @@ def save_fund_list():
 def main():
     st.title("📈 基金持仓跟踪系统")
     
-    # 侧边栏
+    # 侧边栏 - 保持与图片中完全相同的布局
     with st.sidebar:
         st.header("基金管理")
         
@@ -310,11 +295,11 @@ def main():
                         # 获取基金基本信息
                         basic_info = get_fund_basic_info(fund_code)
                         new_fund = {
-                            'code': fund_code,
+                            'code': basic_info['code'],
                             'name': basic_info['name'],
                             'type': basic_info['type'],
-                            'amount': fund_amount,
-                            'cost': fund_cost
+                            'amount': float(fund_amount),
+                            'cost': float(fund_cost)
                         }
                         st.session_state.fund_list.append(new_fund)
                         save_fund_list()
@@ -327,13 +312,17 @@ def main():
         
         st.divider()
         
-        # 显示当前基金列表
+        # 显示当前基金列表 - 保持简单样式
         st.subheader("当前持仓基金")
         if st.session_state.fund_list:
             for i, fund in enumerate(st.session_state.fund_list):
+                # 使用columns创建删除按钮在同一行
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    st.write(f"{fund['name']}({fund['code']})")
+                    # 修复错误：确保所有值都是字符串
+                    fund_name = str(fund.get('name', f"基金{fund.get('code', '')}"))
+                    fund_code_display = str(fund.get('code', ''))
+                    st.write(f"{fund_name} ({fund_code_display})")
                 with col2:
                     if st.button("删除", key=f"del_{i}"):
                         st.session_state.fund_list.pop(i)
@@ -356,45 +345,33 @@ def main():
                 st.info("🟡 非交易时间")
         else:
             st.warning("🔴 非交易日")
-        
-        # 清空缓存按钮
-        if st.button("清空缓存并刷新"):
-            cache_dir = 'data/cache'
-            for file in os.listdir(cache_dir):
-                file_path = os.path.join(cache_dir, file)
-                try:
-                    if os.path.isfile(file_path):
-                        os.unlink(file_path)
-                except Exception as e:
-                    print(f"删除文件失败: {e}")
-            st.success("缓存已清空")
-            st.rerun()
     
-    # 主内容区
+    # 主内容区 - 保持简单直观的布局
     if st.session_state.fund_list:
         st.header("持仓基金概览")
         
-        # 自动刷新选项
-        auto_refresh = st.checkbox("自动刷新（每30秒）", value=False)
-        if auto_refresh:
-            time.sleep(30)
-            st.rerun()
-        
-        # 显示基金数据
+        # 显示基金数据 - 保持简单表格样式
         for fund in st.session_state.fund_list:
             with st.container():
-                st.subheader(f"{fund['name']} ({fund['code']})")
+                # 确保所有值都是字符串
+                fund_name = str(fund.get('name', f"基金{fund.get('code', '')}"))
+                fund_code_display = str(fund.get('code', ''))
+                
+                st.subheader(f"{fund_name} ({fund_code_display})")
                 
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    st.metric("基金类型", fund['type'])
+                    fund_type = str(fund.get('type', '未知'))
+                    st.write(f"**基金类型:** {fund_type}")
                 
                 with col2:
-                    st.metric("持仓金额", f"¥{fund['amount']:,.2f}")
+                    fund_amount = float(fund.get('amount', 0))
+                    st.write(f"**持仓金额:** ¥{fund_amount:,.2f}")
                 
                 with col3:
-                    st.metric("持仓成本", f"{fund['cost']:.4f}")
+                    fund_cost = float(fund.get('cost', 0))
+                    st.write(f"**持仓成本:** {fund_cost:.4f}")
                 
                 # 获取基金数据
                 fund_data = get_fund_data(fund['code'])
@@ -404,29 +381,27 @@ def main():
                     
                     with col1:
                         if fund_data['type'] == 'real_time':
-                            st.metric("实时估算", f"{fund_data['value']:.4f}")
+                            st.write(f"**实时估算:** {fund_data['value']:.4f}")
                         else:
-                            st.metric("单位净值", f"{fund_data['value']:.4f}")
+                            st.write(f"**单位净值:** {fund_data['value']:.4f}")
                     
                     with col2:
                         change = fund_data.get('change') or fund_data.get('daily_change', 0)
-                        change_color = "red-text" if change < 0 else "green-text"
-                        st.metric("涨跌幅", f"{change:.2f}%", delta=f"{change:.2f}%")
+                        change_color = "red" if change < 0 else "green"
+                        st.write(f"**涨跌幅:** <span style='color:{change_color}'>{change:.2f}%</span>", unsafe_allow_html=True)
                     
                     with col3:
-                        if fund_data['type'] == 'real_time':
-                            st.metric("数据来源", "实时估算")
-                        else:
-                            st.metric("数据来源", "基金净值")
+                        data_source = str(fund_data.get('source', '未知'))
+                        st.write(f"**数据来源:** {data_source}")
                     
                     with col4:
-                        date_str = fund_data.get('date') or fund_data.get('update_time', '')
-                        st.metric("更新时间", date_str)
+                        date_str = fund_data.get('date') or fund_data.get('update_time', '未知时间')
+                        st.write(f"**更新时间:** {date_str}")
                     
                     # 计算持仓盈亏
                     if fund_data['value'] and fund['cost']:
-                        current_value = fund_data['value']
-                        cost = fund['cost']
+                        current_value = float(fund_data['value'])
+                        cost = float(fund['cost'])
                         shares = fund['amount'] / cost
                         current_amount = shares * current_value
                         profit = current_amount - fund['amount']
@@ -434,38 +409,30 @@ def main():
                         
                         col1, col2 = st.columns(2)
                         with col1:
-                            st.metric("当前市值", f"¥{current_amount:,.2f}")
+                            st.write(f"**当前市值:** ¥{current_amount:,.2f}")
                         with col2:
-                            st.metric("持仓盈亏", f"¥{profit:,.2f}", 
-                                     delta=f"{profit_rate:.2f}%")
+                            profit_color = "red" if profit < 0 else "green"
+                            st.write(f"**持仓盈亏:** <span style='color:{profit_color}'>¥{profit:,.2f} ({profit_rate:.2f}%)</span>", unsafe_allow_html=True)
                 
                 st.divider()
     
     else:
         st.info("💡 请在左侧添加您的持仓基金开始跟踪")
         
-        # 显示示例
-        st.subheader("示例基金")
-        example_funds = [
-            {"code": "000001", "name": "华夏成长混合", "type": "混合型"},
-            {"code": "110022", "name": "易方达消费行业股票", "type": "股票型"},
-            {"code": "161725", "name": "招商中证白酒指数", "type": "指数型"}
-        ]
+        # 显示操作指南
+        st.subheader("使用指南")
+        st.write("""
+        1. 在左侧面板输入基金代码、持仓金额和持仓成本
+        2. 点击"添加基金"按钮将基金添加到跟踪列表
+        3. 系统会自动获取基金的实时数据或最新净值
+        4. 在交易时间内，系统会显示实时估算数据
+        5. 非交易时间显示最新基金净值
         
-        for fund in example_funds:
-            with st.expander(f"{fund['name']} ({fund['code']})"):
-                fund_data = get_fund_data(fund['code'])
-                if fund_data:
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("当前净值", f"{fund_data['value']:.4f}")
-                    with col2:
-                        change = fund_data.get('change') or fund_data.get('daily_change', 0)
-                        st.metric("涨跌幅", f"{change:.2f}%")
-                    with col3:
-                        st.metric("数据来源", fund_data['source'])
-                else:
-                    st.warning("无法获取该基金数据")
+        **常见基金代码示例:**
+        - 000001: 华夏成长混合
+        - 110022: 易方达消费行业股票
+        - 161725: 招商中证白酒指数
+        """)
 
 # 运行主程序
 if __name__ == "__main__":
