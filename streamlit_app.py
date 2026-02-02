@@ -1,134 +1,158 @@
 import streamlit as st
 import pandas as pd
 import os
-import time
-import requests
-import akshare as ak
 import datetime
-import io
+import akshare as ak
 
-# --- 1. 页面配置 ---
+# --- 配置 ---
 st.set_page_config(page_title="基金持仓分析 Pro", layout="wide")
 st.title("📈 基金持仓实时深度分析")
+CSV_FILE = 'fund_favs.csv'
 
-# --- 2. 核心函数：获取基金数据 ---
-@st.cache_data(ttl=300) # 缓存5分钟
-def get_fund_data(fund_code_or_name):
+# --- 辅助函数 ---
+def is_trading_time():
+    now = datetime.datetime.now()
+    if now.weekday() >= 5: return False
+    h, m = now.hour, now.minute
+    return (9 <= h < 11 or (h == 11 and m <= 30)) or (13 <= h < 15)
+
+@st.cache_data(ttl=3600)
+def get_detail_data(fund_code):
     try:
-        # 1. 获取基金基础信息 (根据名称或代码搜索)
-        # 注意：AkShare 的搜索接口有时候不稳定，这里做容错
-        search_df = ak.fund_em_fund_name()
-        # 筛选匹配的基金
-        matched = search_df[
-            (search_df['基金代码'] == fund_code_or_name) | 
-            (search_df['基金简称'] == fund_code_or_name)
-        ]
-        
-        if matched.empty:
-            return None, f"未找到基金：{fund_code_or_name}"
-        
-        # 取第一个匹配结果
-        fund_info = matched.iloc[0]
-        fund_code = fund_info['基金代码']
-        fund_name = fund_info['基金简称']
-        
-        # 2. 获取持仓详情
-        # AkShare 的持仓接口参数经常变，这里使用较新的写法
-        # indicator="1" 代表股票持仓
-        portfolio_df = ak.fund_portfolio_hold_em(symbol=fund_code, indicator="1")
-        
-        if portfolio_df.empty:
-            return None, "该基金暂无持仓数据或接口异常。"
-        
-        # 3. 数据清洗
-        # 提取最新的报告期数据
-        # 通常报告期列名包含 "报告期"
-        date_col = None
-        for col in portfolio_df.columns:
-            if "报告期" in col:
-                date_col = col
-                break
-        
+        df = ak.fund_portfolio_hold_em(symbol=fund_code, indicator="1")
+        if df.empty: return None, "无持仓数据", None
+        date_col = next((c for c in df.columns if '报告期' in c), None)
         if date_col:
-            # 转换为日期格式并排序，取最新的
-            portfolio_df[date_col] = pd.to_datetime(portfolio_df[date_col])
-            latest_date = portfolio_df[date_col].max()
-            latest_df = portfolio_df[portfolio_df[date_col] == latest_date]
+            df[date_col] = pd.to_datetime(df[date_col])
+            df = df[df[date_col] == df[date_col].max()].copy()
+            report_date = df[date_col].iloc[0].strftime('%Y-%m-%d')
         else:
-            # 如果没有日期列，直接使用全部数据
-            latest_df = portfolio_df
-        
-        # 4. 计算实时估值 (估算)
-        # 获取上个交易日的净值
-        # AkShare 的历史净值接口
-        try:
-            # 获取单位净值走势
-            hist_df = ak.fund_open_fund_info_em(symbol=fund_code, indicator="单位净值走势")
-            if not hist_df.empty:
-                # 通常第一行就是最新的
-                latest_nav = hist_df.iloc[0]['单位净值']
-                # 估算涨跌幅: 这里简化处理，实际需要抓取持仓股实时行情计算
-                # 由于 AkShare 的实时估算接口不稳定，这里直接显示历史涨跌幅
-                change_pct = hist_df.iloc[0]['日增长率']
-            else:
-                latest_nav = "N/A"
-                change_pct = "N/A"
-        except:
-            latest_nav = "N/A"
-            change_pct = "N/A"
-        
-        return {
-            "code": fund_code,
-            "name": fund_name,
-            "portfolio": latest_df,
-            "nav": latest_nav,
-            "change": change_pct
-        }, ""
-    
+            report_date = "最新一期"
+        cols_map = {'股票代码':'stock_code','股票名称':'stock_name','占净值比例':'curr_weight'}
+        df = df[[k for k in cols_map.keys() if k in df.columns]].rename(columns=cols_map)
+        df['curr_weight'] = pd.to_numeric(df.get('curr_weight', 0), errors='coerce').fillna(0)
+        return df, report_date, None
     except Exception as e:
-        return None, f"数据处理出错: {str(e)}"
+        return None, f"获取失败: {str(e)}", None
 
-# --- 3. 主程序逻辑 ---
-def main():
-    # 创建搜索栏
-    st.header("基金查询")
-    search_input = st.text_input("请输入基金代码或名称", placeholder="例如: 161725 或 招商中证白酒")
+def get_fund_realtime_info(fund_code):
+    try:
+        hist = ak.fund_open_fund_info_em(symbol=fund_code, indicator="单位净值走势")
+        if hist.empty: return "N/A", "N/A", "数据空"
+        nav = hist.iloc[0]['单位净值']
+        date = hist.iloc[0]['净值日期']
+        return f"{nav:.4f}", f"(截至{date})", None if not is_trading_time() else "⚠️ 盘中估算维护中"
+    except: return "N/A", "N/A", None
+
+# --- 收藏功能（核心修复）---
+def load_favs():
+    if os.path.exists(CSV_FILE):
+        df = pd.read_csv(CSV_FILE, dtype={'code': str})
+        return df if 'name' in df.columns else pd.DataFrame(columns=['code','name'])
+    return pd.DataFrame(columns=['code','name'])
+
+def save_favs(df):
+    df.to_csv(CSV_FILE, index=False, encoding='utf-8-sig')
+
+def add_to_favs(code, name):
+    df = load_favs()
+    if code not in df['code'].values:
+        df = pd.concat([df, pd.DataFrame([{'code': code, 'name': name}])], ignore_index=True)
+        save_favs(df)
+        return True
+    return False
+
+def remove_from_favs(code):
+    df = load_favs()
+    df = df[df['code'] != code].reset_index(drop=True)
+    save_favs(df)
+
+# --- 侧边栏：搜索 + 收藏管理 ---
+with st.sidebar:
+    st.title("🔍 基金搜索")
+    search_input = st.text_input("输入代码或名称", placeholder="161725 / 招商白酒")
     
-    if st.button("查询"):
-        if not search_input:
-            st.error("请输入基金代码或名称！")
-            return
-        
-        with st.spinner("正在努力加载数据..."):
-            data, error_msg = get_fund_data(search_input)
-        
-        if error_msg:
-            st.error(error_msg)
-            return
-        
-        # --- 展示结果 ---
-        st.success(f"成功获取: {data['name']} ({data['code']}) 的数据")
-        
-        # 显示基本信息
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("最新单位净值", data['nav'])
-        with col2:
-            st.metric("日增长率", data['change'])
-        
-        # 显示持仓表格
-        st.subheader("📊 最新持仓明细")
-        # 只展示关键列
-        display_cols = []
-        for col in ['股票代码', '股票名称', '占净值比例', '持仓市值(万元)']:
-            if col in data['portfolio'].columns:
-                display_cols.append(col)
-        
-        if display_cols:
-            st.dataframe(data['portfolio'][display_cols])
+    st.markdown("---")
+    st.title("⭐ 我的收藏")
+    favs = load_favs()
+    if len(favs) > 0:
+        for idx, row in favs.iterrows():
+            col1, col2 = st.columns([4,1])
+            with col1:
+                st.write(f"`{row['code']}` {row['name']}")
+            with col2:
+                if st.button("🗑️", key=f"del_{row['code']}", help="删除"):
+                    remove_from_favs(row['code'])
+                    st.rerun()
+    else:
+        st.info("暂无收藏，搜索后点击⭐添加")
+    
+    st.markdown("---")
+    st.title("☁️ 数据同步")
+    uploaded = st.file_uploader("上传CSV备份", type="csv")
+    if uploaded:
+        try:
+            pd.read_csv(uploaded).to_csv(CSV_FILE, index=False, encoding='utf-8-sig')
+            st.success("导入成功！")
+            st.rerun()
+        except Exception as e:
+            st.error(f"导入失败: {e}")
+    
+    if st.button("📥 导出收藏列表"):
+        if os.path.exists(CSV_FILE):
+            with open(CSV_FILE, "rb") as f:
+                st.download_button("下载CSV", f, file_name="my_funds.csv", mime="text/csv")
         else:
-            st.write("持仓数据字段暂不支持展示，请稍后重试。")
+            st.warning("收藏列表为空")
 
-# --- 4. 启动应用 ---
-if __name__ == "__main__":
-    main()
+# --- 主界面：查询逻辑 ---
+if search_input:
+    # 智能识别：代码 or 名称
+    if search_input.isdigit() and len(search_input) == 6:
+        fund_code, fund_name = search_input, "未知基金"
+    else:
+        try:
+            all_funds = ak.fund_em_fund_name()
+            match = all_funds[all_funds['基金简称'] == search_input]
+            if not match.empty:
+                fund_code, fund_name = match.iloc[0]['基金代码'], search_input
+            else:
+                st.error("❌ 未找到该基金，请检查名称或输入6位代码")
+                st.stop()
+        except Exception as e:
+            st.error(f"搜索接口异常: {e}")
+            st.stop()
+    
+    # 获取数据
+    with st.spinner(f"加载 {fund_name} ({fund_code})..."):
+        hold_df, report_date, err = get_detail_data(fund_code)
+        nav, note, warn = get_fund_realtime_info(fund_code)
+    
+    if err:
+        st.error(err)
+    else:
+        # 显示结果
+        st.subheader(f"{fund_name} (`{fund_code}`)")
+        col1, col2, col3 = st.columns(3)
+        with col1: st.metric("报告期", report_date)
+        with col2: st.metric("单位净值", nav, note)
+        with col3:
+            if add_to_favs(fund_code, fund_name):
+                st.success("✅ 已添加到收藏")
+            else:
+                st.info("⭐ 已在收藏中")
+            if st.button("⭐ 收藏到列表", key="add_btn"):
+                if add_to_favs(fund_code, fund_name):
+                    st.rerun()
+        
+        if warn: st.warning(warn)
+        st.dataframe(
+            hold_df,
+            column_config={
+                "stock_code": "股票代码",
+                "stock_name": "股票名称",
+                "curr_weight": st.column_config.NumberColumn("占比(%)", format="%.2f%%")
+            },
+            hide_index=True,
+            use_container_width=True
+        )
