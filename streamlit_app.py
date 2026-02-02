@@ -28,27 +28,6 @@ st.markdown("""
 * {
     font-family: 'Noto Sans SC', sans-serif;
 }
-.fund-card {
-    border: 1px solid #e0e0e0;
-    border-radius: 10px;
-    padding: 15px;
-    margin-bottom: 10px;
-    background: white;
-    transition: all 0.3s ease;
-}
-.fund-card:hover {
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    transform: translateY(-2px);
-}
-.fund-card.up {
-    border-left: 4px solid #F44336;
-}
-.fund-card.down {
-    border-left: 4px solid #4CAF50;
-}
-.fund-card.flat {
-    border-left: 4px solid #2196F3;
-}
 .red-text {
     color: #F44336;
     font-weight: bold;
@@ -183,7 +162,7 @@ def get_fund_real_time_data(fund_code):
                         'type': 'real_time',
                         'value': estimated_value,
                         'change': estimated_change if estimated_change is not None else 0,
-                        'update_time': get_beijing_time().strftime('%H:%M:%S'),
+                        'update_time': get_beijing_time().strftime('%Y-%m-%d %H:%M:%S'),  # 添加年月日
                         'source': '实时估算'
                     }
         except Exception as e:
@@ -215,7 +194,7 @@ def get_fund_real_time_data(fund_code):
                         'type': 'nav',
                         'value': nav_value,
                         'date': nav_date if nav_date else get_beijing_time().strftime('%Y-%m-%d'),
-                        'update_time': get_beijing_time().strftime('%H:%M:%S'),
+                        'update_time': get_beijing_time().strftime('%Y-%m-%d %H:%M:%S'),  # 添加年月日
                         'source': '最新净值'
                     }
         except Exception as e:
@@ -224,22 +203,6 @@ def get_fund_real_time_data(fund_code):
         return None
     except:
         return None
-
-def calculate_fund_change(fund_code):
-    """计算基金涨跌幅（如果有持仓数据的话）"""
-    # 这里可以扩展为根据持仓股票实时计算
-    # 目前先返回None，使用实时估算数据
-    return None
-
-def get_fund_holdings(fund_code):
-    """获取基金持仓数据"""
-    try:
-        holdings = ak.fund_em_portfolio_hold(fund=fund_code)
-        if not holdings.empty:
-            return holdings.head(10)
-        return pd.DataFrame()
-    except:
-        return pd.DataFrame()
 
 def search_funds(keyword):
     """搜索基金"""
@@ -265,7 +228,7 @@ with st.sidebar:
     
     # 显示北京时间
     beijing_time = get_beijing_time()
-    st.caption(f"🕐 更新时间: {beijing_time.strftime('%H:%M:%S')}")
+    st.caption(f"🕐 更新时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
     
     # 判断交易日状态
     trading_day = is_trading_day()
@@ -438,220 +401,121 @@ if st.session_state.fund_list:
     st.markdown("---")
     st.subheader(f"⭐ 我的基金收藏 ({len(st.session_state.fund_list)})")
     
-    # 创建选项卡
-    view_tab1, view_tab2 = st.tabs(["📊 卡片视图", "📋 列表视图"])
+    # 创建表格数据
+    table_data = []
     
-    with view_tab1:
-        # 卡片视图
-        cols = st.columns(3)
-        
-        for idx, fund_code in enumerate(st.session_state.fund_list):
-            col_idx = idx % 3
-            with cols[col_idx]:
-                fund_info = get_fund_basic_info(fund_code)
-                
-                # 获取实时数据
-                with st.spinner(f"获取{fund_code}数据中..."):
-                    real_time_data = get_fund_real_time_data(fund_code)
-                
-                if real_time_data:
-                    if real_time_data['type'] == 'real_time':
-                        # 实时估算数据
-                        value = real_time_data['value']
-                        change = real_time_data.get('change', 0)
-                        
-                        # 红涨绿跌
-                        if change > 0:
-                            card_class = "up"
-                            change_color = "red-text"
-                            change_display = f"+{change:.2f}%"
-                        elif change < 0:
-                            card_class = "down"
-                            change_color = "green-text"
-                            change_display = f"{change:.2f}%"
-                        else:
-                            card_class = "flat"
-                            change_color = ""
-                            change_display = f"{change:.2f}%"
-                        
-                        st.markdown(f"""
-                        <div class="fund-card {card_class}">
-                            <h4 style="margin:0;">{fund_info['name']}</h4>
-                            <p style="color:#666; font-size:0.9em; margin:5px 0;">{fund_code}</p>
-                            <div style="display:flex; justify-content:space-between; align-items:center;">
-                                <span style="font-size:1.1em; font-weight:bold;">实时估算</span>
-                                <span class="{change_color}" style="font-size:1.5em; font-weight:bold;">
-                                    {change_display}
-                                </span>
-                            </div>
-                            <p style="font-size:0.9em; color:#666; margin-top:5px;">
-                                估算净值: {value:.4f}
-                            </p>
-                            <p style="font-size:0.8em; color:#888; margin:0;">
-                                {real_time_data['update_time']} • {real_time_data['source']}
-                            </p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    else:
-                        # 净值数据
-                        value = real_time_data['value']
-                        date_str = real_time_data.get('date', '')
-                        
-                        st.markdown(f"""
-                        <div class="fund-card flat">
-                            <h4 style="margin:0;">{fund_info['name']}</h4>
-                            <p style="color:#666; font-size:0.9em; margin:5px 0;">{fund_code}</p>
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin:10px 0;">
-                                <span style="font-size:1.1em; font-weight:bold;">单位净值</span>
-                                <span style="font-size:1.3em; font-weight:bold; color:#2196F3;">
-                                    {value:.4f}
-                                </span>
-                            </div>
-                            <p style="font-size:0.8em; color:#888; margin:0;">
-                                {date_str} • {real_time_data['source']}
-                            </p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                else:
-                    # 无法获取数据
-                    st.markdown(f"""
-                    <div class="fund-card flat">
-                        <h4 style="margin:0;">{fund_info['name']}</h4>
-                        <p style="color:#666; font-size:0.9em; margin:5px 0;">{fund_code}</p>
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <span style="font-size:1.2em; font-weight:bold;">交易日</span>
-                            <span style="font-size:1.2em; font-weight:bold; color:#FF9800;">
-                                数据获取中
-                            </span>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                # 操作按钮
-                col_btn1, col_btn2 = st.columns(2)
-                with col_btn1:
-                    if st.button("查看详情", key=f"detail_{fund_code}", use_container_width=True):
-                        st.session_state.selected_fund = fund_code
-                with col_btn2:
-                    if st.button("刷新", key=f"refresh_{fund_code}", use_container_width=True):
-                        st.rerun()
+    # 显示加载状态
+    if len(st.session_state.fund_list) > 0:
+        progress_bar = st.progress(0)
+        status_text = st.empty()
     
-    with view_tab2:
-        # 列表视图 - 使用HTML表格实现红涨绿跌
-        st.write("### 基金列表")
+    for idx, fund_code in enumerate(st.session_state.fund_list):
+        if len(st.session_state.fund_list) > 0:
+            status_text.text(f"正在获取 {fund_code} 的数据... ({idx+1}/{len(st.session_state.fund_list)})")
         
-        # 创建表格数据
-        table_html = """
-        <table style="width:100%; border-collapse: collapse; margin-top: 20px;">
-            <thead>
-                <tr style="background-color: #f2f2f2; border-bottom: 2px solid #ddd;">
-                    <th style="padding: 12px; text-align: left;">基金代码</th>
-                    <th style="padding: 12px; text-align: left;">基金名称</th>
-                    <th style="padding: 12px; text-align: left;">类型</th>
-                    <th style="padding: 12px; text-align: right;">估算净值</th>
-                    <th style="padding: 12px; text-align: right;">涨跌幅</th>
-                </tr>
-            </thead>
-            <tbody>
-        """
+        # 获取基金基本信息
+        fund_info = get_fund_basic_info(fund_code)
         
-        for fund_code in st.session_state.fund_list:
-            fund_info = get_fund_basic_info(fund_code)
-            real_time_data = get_fund_real_time_data(fund_code)
-            
-            if real_time_data and real_time_data['type'] == 'real_time':
+        # 获取实时数据
+        real_time_data = get_fund_real_time_data(fund_code)
+        
+        # 准备表格行数据
+        row_data = {
+            '基金代码': fund_code,
+            '基金名称': fund_info['name']
+        }
+        
+        if real_time_data:
+            if real_time_data['type'] == 'real_time':
                 # 实时估算数据
-                value = real_time_data['value']
                 change = real_time_data.get('change', 0)
                 
-                # 红涨绿跌
+                # 设置涨跌幅度显示（红涨绿跌）
                 if change > 0:
-                    change_color = "#F44336"
-                    change_display = f"+{change:.2f}%"
+                    change_display = f"<span class='red-text'>+{change:.2f}%</span>"
                 elif change < 0:
-                    change_color = "#4CAF50"
-                    change_display = f"{change:.2f}%"
+                    change_display = f"<span class='green-text'>{change:.2f}%</span>"
                 else:
-                    change_color = "#666666"
                     change_display = f"{change:.2f}%"
                 
-                value_display = f"{value:.4f}"
-                data_type = "实时估算"
-            elif real_time_data and real_time_data['type'] == 'nav':
-                # 净值数据
-                value = real_time_data['value']
-                value_display = f"{value:.4f}"
-                change_display = "-"
-                change_color = "#666666"
-                data_type = "单位净值"
+                row_data['更新时间'] = real_time_data['update_time']
+                row_data['涨跌幅度'] = change_display
+                row_data['估算净值'] = f"{real_time_data['value']:.4f}"
+                row_data['数据状态'] = '实时估算'
+                
             else:
-                value_display = "-"
-                change_display = "-"
-                change_color = "#666666"
-                data_type = "无数据"
-            
-            # 添加行
-            table_html += f"""
-            <tr style="border-bottom: 1px solid #ddd;">
-                <td style="padding: 12px;">{fund_code}</td>
-                <td style="padding: 12px;">{fund_info['name']}</td>
-                <td style="padding: 12px;">{data_type}</td>
-                <td style="padding: 12px; text-align: right; font-weight: bold;">{value_display}</td>
-                <td style="padding: 12px; text-align: right; font-weight: bold; color: {change_color};">{change_display}</td>
-            </tr>
-            """
+                # 净值数据
+                row_data['更新时间'] = real_time_data.get('date', '')
+                row_data['涨跌幅度'] = '-'
+                row_data['估算净值'] = f"{real_time_data['value']:.4f}"
+                row_data['数据状态'] = '单位净值'
+        else:
+            row_data['更新时间'] = '暂无数据'
+            row_data['涨跌幅度'] = '-'
+            row_data['估算净值'] = '-'
+            row_data['数据状态'] = '无数据'
         
-        table_html += """
-            </tbody>
-        </table>
-        """
+        table_data.append(row_data)
+        if len(st.session_state.fund_list) > 0:
+            progress_bar.progress((idx + 1) / len(st.session_state.fund_list))
+    
+    if len(st.session_state.fund_list) > 0:
+        status_text.text("数据加载完成！")
+    
+    # 创建DataFrame
+    if table_data:
+        df = pd.DataFrame(table_data)
         
-        st.markdown(table_html, unsafe_allow_html=True)
+        # 重新排序列顺序
+        df = df[['基金代码', '基金名称', '更新时间', '涨跌幅度', '估算净值', '数据状态']]
         
-        # 添加操作按钮
+        # 使用st.dataframe显示，允许HTML渲染
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "基金代码": st.column_config.TextColumn("基金代码", width="small"),
+                "基金名称": st.column_config.TextColumn("基金名称"),
+                "更新时间": st.column_config.TextColumn("更新时间", width="medium"),
+                "涨跌幅度": st.column_config.TextColumn("涨跌幅度", width="small"),
+                "估算净值": st.column_config.TextColumn("估算净值", width="small"),
+                "数据状态": st.column_config.TextColumn("数据状态", width="small")
+            }
+        )
+        
+        # 操作按钮
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("📥 导出数据为CSV", use_container_width=True):
-                # 准备导出数据
+            if st.button("📥 导出表格为CSV", use_container_width=True):
+                # 准备导出数据（去掉HTML标签）
                 export_data = []
-                for fund_code in st.session_state.fund_list:
-                    fund_info = get_fund_basic_info(fund_code)
-                    real_time_data = get_fund_real_time_data(fund_code)
-                    
-                    row = {
-                        '基金代码': fund_code,
-                        '基金名称': fund_info['name'],
-                        '更新时间': get_beijing_time().strftime('%Y-%m-%d %H:%M:%S')
-                    }
-                    
-                    if real_time_data and real_time_data['type'] == 'real_time':
-                        row['类型'] = '实时估算'
-                        row['估算净值'] = real_time_data['value']
-                        row['涨跌幅%'] = real_time_data.get('change', 0)
-                    elif real_time_data and real_time_data['type'] == 'nav':
-                        row['类型'] = '单位净值'
-                        row['净值'] = real_time_data['value']
-                        row['净值日期'] = real_time_data.get('date', '')
-                    else:
-                        row['类型'] = '无数据'
-                        row['净值'] = ''
-                        row['涨跌幅%'] = ''
-                    
-                    export_data.append(row)
+                for row in table_data:
+                    export_row = row.copy()
+                    # 清理涨跌幅度的HTML标签
+                    if '涨跌幅度' in export_row and export_row['涨跌幅度'] != '-':
+                        # 去掉HTML标签
+                        import re
+                        clean_change = re.sub(r'<[^>]+>', '', export_row['涨跌幅度'])
+                        export_row['涨跌幅度'] = clean_change
+                    export_data.append(export_row)
                 
-                if export_data:
-                    df = pd.DataFrame(export_data)
-                    csv = df.to_csv(index=False, encoding='utf-8-sig')
-                    st.download_button(
-                        label="点击下载CSV文件",
-                        data=csv,
-                        file_name=f"fund_data_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv",
-                        key="download_csv"
-                    )
+                export_df = pd.DataFrame(export_data)
+                export_df = export_df[['基金代码', '基金名称', '更新时间', '涨跌幅度', '估算净值', '数据状态']]
+                csv = export_df.to_csv(index=False, encoding='utf-8-sig')
+                st.download_button(
+                    label="点击下载CSV文件",
+                    data=csv,
+                    file_name=f"fund_data_{get_beijing_time().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    key="download_csv"
+                )
+        
         with col2:
-            if st.button("🔄 刷新所有数据", use_container_width=True):
+            if st.button("🔄 刷新数据", use_container_width=True):
                 st.rerun()
+    else:
+        st.info("暂无数据")
 
 # 基金详情展示
 if st.session_state.get('selected_fund'):
@@ -704,14 +568,6 @@ if st.session_state.get('selected_fund'):
     
     else:
         st.warning("无法获取基金数据")
-    
-    # 显示持仓数据
-    with st.expander("📊 查看持仓数据"):
-        holdings = get_fund_holdings(fund_code)
-        if not holdings.empty:
-            st.dataframe(holdings, use_container_width=True, hide_index=True)
-        else:
-            st.info("暂无持仓数据")
 
 # 页脚
 st.markdown("---")
